@@ -1,190 +1,675 @@
-"""Interface de supervision humaine LOGIMIND (Flask, Python pur).  Lancer :  python app.py"""
-import json, os
-from flask import Flask, render_template_string, request, redirect, url_for
-import seed, agents
 
-DB = seed.DB
-app = Flask(__name__)
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+from agents import run_agents
 
-def init():
-    if not os.path.exists(DB):
-        seed.build(); agents.orchestrate(DB)
 
-def scores():
-    con = agents.connect(DB); r = agents.quality_scores(con); con.close(); return r
+# CONFIGURATION
+st.set_page_config(
+    page_title="LogiMind | Data Governance",
+    page_icon="📦",
+    layout="wide"
+)
 
-def q(sql, args=()):
-    con = agents.connect(DB); r = agents.rows(con, sql, args); con.close(); return r
 
-CSS = """
-:root{--navy:#0B1B33;--blue:#2F6BFF;--bg:#F4F6FB;--card:#fff;--ink:#14213D;--mut:#6B7690;--line:#E3E8F2;
---hi:#E5484D;--mid:#F5A524;--lo:#8A94A8;--ok:#12A87C}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Segoe UI",Calibri,Arial,sans-serif}
-header{background:var(--navy);color:#fff;padding:0 32px;display:flex;align-items:center;gap:28px;height:64px}
-.brand{font:700 22px Cambria,Georgia,serif;letter-spacing:.5px}.brand small{display:block;font:400 11px "Segoe UI",sans-serif;color:#9FB2D6;letter-spacing:1.5px;text-transform:uppercase}
-nav{display:flex;gap:4px;margin-left:12px}nav a{color:#B9C7E4;text-decoration:none;padding:8px 14px;border-radius:8px;font-size:14px}
-nav a.on,nav a:hover{background:#1B3157;color:#fff}.sp{flex:1}
-.who{font-size:13px;color:#9FB2D6}.who b{color:#fff}
-main{max-width:1180px;margin:28px auto;padding:0 24px}
-.kpis{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:16px;margin-bottom:24px}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
-.kpi .l{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}.kpi .v{font:700 36px Cambria,serif;margin-top:4px}
-.kpi.big{background:var(--navy);color:#fff;border:0}.kpi.big .l{color:#9FB2D6}.kpi.big .v{font-size:46px}
-h2{font:700 22px Cambria,serif;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}
-.bar{display:flex;gap:10px;align-items:center;margin-bottom:18px}
-.pill{padding:6px 14px;border-radius:99px;background:#fff;border:1px solid var(--line);text-decoration:none;color:var(--ink);font-size:13px}
-.pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
-.rec{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px;display:grid;grid-template-columns:8px 1fr auto;gap:18px}
-.sev{border-radius:4px}.Haute{background:var(--hi)}.Moyenne{background:var(--mid)}.Faible{background:var(--lo)}
-.chips{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px}
-.chip{padding:2px 10px;border-radius:99px;background:#EAF0FF;color:#1D4ED8;font-weight:600}
-.chip.g{background:#E7F7F1;color:#0B7A59}.chip.r{background:#FDECEC;color:#B42318}.chip.y{background:#FFF3DC;color:#9A6200}.chip.n{background:#EEF1F6;color:#4A5568}
-.rec h3{margin:0 0 4px;font-size:17px}.rec p{margin:2px 0;color:#3B4660}
-.act{margin-top:8px;padding:8px 12px;background:#F2F6FF;border-radius:8px;font-size:14px}
-details{margin-top:8px;font-size:13px;color:var(--mut)}summary{cursor:pointer;color:var(--blue)}details li{margin:2px 0}
-.side{display:flex;flex-direction:column;gap:8px;min-width:210px}
-.side input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px}
-button{border:0;border-radius:9px;padding:10px 14px;font:600 14px inherit;cursor:pointer}
-.b-ok{background:var(--ok);color:#fff}.b-no{background:#fff;color:var(--hi);border:1px solid #F3C5C7}.b-re{background:#fff;color:var(--blue);border:1px solid #C9D8FF}.b-dark{background:var(--navy);color:#fff}
-.b-ghost{background:#1B3157;color:#fff;font-weight:500;font-size:13px}
-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:14px}th{background:#F7F9FD;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.8px}
-.score{display:grid;grid-template-columns:130px 1fr 80px;gap:14px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:10px}
-.track{height:12px;background:#EDF1F8;border-radius:99px;overflow:hidden}.fill{height:100%;border-radius:99px}
-.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;overflow-x:auto}
-.empty{padding:40px;text-align:center;color:var(--mut);background:#fff;border:1px dashed var(--line);border-radius:14px}
-"""
+# STYLE DE L'INTERFACE
+st.markdown("""
+<style>
+.stApp {
+    background-color: #F5F7FB;
+}
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
+}
+[data-testid="stSidebar"] {
+    background-color: #17243A;
+}
+[data-testid="stSidebar"] * {
+    color: white;
+}
+.hero {
+    background: linear-gradient(120deg, #17243A, #254B69);
+    padding: 28px;
+    border-radius: 18px;
+    color: white;
+    margin-bottom: 22px;
+}
+.hero p {
+    color: #D8E6F3;
+}
+div[data-testid="stMetric"] {
+    background: white;
+    padding: 16px;
+    border: 1px solid #E5EAF2;
+    border-radius: 12px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-BASE = """<!doctype html><html lang="fr"><meta charset="utf-8"><title>LOGIMIND – Supervision</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>{{css|safe}}</style>
-<header><div class="brand">LOGIMIND<small>Équipe d'agents Data</small></div>
-<nav>{% for k,l in tabs %}<a class="{{'on' if k==tab}}" href="{{url_for(k)}}">{{l}}</a>{% endfor %}</nav><div class="sp"></div>
-<form method="post" action="{{url_for('run')}}"><button class="b-ghost">↻ Relancer l'analyse</button></form>
-<form method="post" action="{{url_for('reset')}}" onsubmit="return confirm('Réinitialiser la démo ?')"><button class="b-ghost">Réinitialiser</button></form>
-<div class="who">Connectée : <b>Responsable Data</b></div></header>
-<main>{{body|safe}}</main></html>"""
 
-TABS = [("recs", "Recommandations"), ("quality", "Qualité"), ("catalog", "Catalogue"), ("lineage", "Lineage"), ("audit", "Audit")]
+# DONNEES DE DEMONSTRATION
+def sample_data():
+    return pd.DataFrame([
+        ["CMD001", "CL001", "0612345678",
+         "12 rue des Fleurs, Rabat", "2026-10-22", "A livrer", 250],
+        ["CMD002", "CL002", "",
+         "8 avenue Hassan II, Kenitra", "2026-10-22", "A livrer", 180],
+        ["CMD003", "CL003", "0622334455",
+         "Casablanca", "2026-10-23", "A livrer", 320],
+        ["CMD004", "CL004", "0633445566",
+         "5 boulevard Zerktouni, Casablanca", "2026-15-40", "A livrer", 95],
+        ["CMD005", "CL005", "0644556677",
+         "20 rue Ibn Sina, Fes", "2026-10-24", "A livrer", 410],
+        ["CMD005", "CL005", "0644556677",
+         "20 rue Ibn Sina, Fes", "2026-10-24", "A livrer", 410],
+        ["CMD007", "CL007", "0677889900",
+         "3 rue des Ecoles, Tanger", "2026-10-25", "A livrer", 135],
+        ["CMD008", "CL008", "0688990011",
+         "", "2026-10-25", "A livrer", 220],
+        ["CMD009", "CL009", "0699001122",
+         "14 avenue Mohammed V, Meknes", "2026-10-26", "A livrer", 75],
+        ["CMD010", "CL010", "0600112233",
+         "2 rue Al Qods, Agadir", "2026-10-27", "A livrer", 160],
+    ], columns=[
+        "commande_id",
+        "client_id",
+        "telephone",
+        "adresse",
+        "date_livraison",
+        "statut",
+        "montant"
+    ])
 
-def page(tab, body):
-    return render_template_string(BASE, css=CSS, tab=tab, tabs=TABS, body=body)
 
-def tpl(s, **kw): return render_template_string(s, **kw)
+# INITIALISATION DE LA SESSION
+if "data" not in st.session_state:
+    st.session_state.data = sample_data()
 
-@app.route("/")
-def recs():
-    st = request.args.get("status", "Proposée")
-    sc = scores()
-    cnt = {r["status"]: r["n"] for r in q("SELECT status, count(*) n FROM recommendations GROUP BY status")}
-    sql = "SELECT * FROM recommendations" + ("" if st == "Toutes" else " WHERE status=?") + " ORDER BY priority DESC"
-    items = q(sql, () if st == "Toutes" else (st,))
-    for r in items:
-        r["evidence"] = json.loads(r["evidence"]); r["down"] = json.loads(r["impact"]).get("downstream", [])
-    body = tpl("""
-<div class="kpis">
- <div class="kpi big"><div class="l">Score de qualité global</div><div class="v">{{sc['_global']}}%</div></div>
- <div class="kpi"><div class="l">En attente de décision</div><div class="v" style="color:#B45309">{{cnt.get('Proposée',0)+cnt.get('À réanalyser',0)}}</div></div>
- <div class="kpi"><div class="l">Acceptées</div><div class="v" style="color:var(--ok)">{{cnt.get('Acceptée',0)}}</div></div>
- <div class="kpi"><div class="l">Rejetées</div><div class="v" style="color:var(--hi)">{{cnt.get('Rejetée',0)}}</div></div></div>
-<h2>Recommandations des agents</h2><p class="sub">Triées par priorité (gravité × impact en aval). Aucune donnée n'est modifiée sans votre décision.</p>
-<div class="bar">{% for s in ['Proposée','Acceptée','Rejetée','Toutes'] %}<a class="pill {{'on' if s==st}}" href="?status={{s}}">{{s if s!='Proposée' else 'À traiter'}}</a>{% endfor %}</div>
-{% for r in items %}<div class="rec"><div class="sev {{r.severity}}"></div><div>
- <div class="chips"><span class="chip">Agent {{r.agent}}</span><span class="chip {{'r' if r.severity=='Haute' else 'y' if r.severity=='Moyenne' else 'n'}}">Gravité {{r.severity}}</span>
- <span class="chip n">{{r.table_name}}</span><span class="chip n">Priorité {{r.priority}}</span>
- {% if r.status!='Proposée' %}<span class="chip {{'g' if r.status=='Acceptée' else 'r' if r.status=='Rejetée' else 'y'}}">{{r.status}}</span>{% endif %}</div>
- <h3>{{r.title}}</h3><p>{{r.detail}}</p>
- <details><summary>Voir les preuves</summary><ul>{% for e in r.evidence %}<li>{{e}}</li>{% endfor %}</ul></details>
- <div class="act"><b>Action proposée :</b> {{r.proposed_action}}{% if r.down %} · <span style="color:var(--mut)">{{r.down|length}} objets en aval concernés</span>{% endif %}</div>
- {% if r.result %}<p style="margin-top:8px"><b>Résultat :</b> {{r.result}} <span style="color:var(--mut)">({{r.decided_by}}, {{r.decided_at}}){% if r.comment %} — « {{r.comment}} »{% endif %}</span></p>{% endif %}
+if "analysis" not in st.session_state:
+    st.session_state.analysis = None
+
+if "decisions" not in st.session_state:
+    st.session_state.decisions = {}
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+
+# OUTILS POUR L'INTERFACE
+def reset_analysis():
+    st.session_state.analysis = None
+    st.session_state.decisions = {}
+
+
+def record_history(action, detail, responsable="Système",
+                   commentaire=""):
+    st.session_state.history.append({
+        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Action": action,
+        "Détail": detail,
+        "Responsable": responsable,
+        "Commentaire": commentaire
+    })
+
+
+# NAVIGATION
+with st.sidebar:
+    st.markdown("# 📦 LogiMind")
+    st.caption("DATA GOVERNANCE")
+    st.divider()
+
+    page = st.radio(
+        "NAVIGATION",
+        [
+            "Vue d'ensemble",
+            "Données & analyse",
+            "Agents",
+            "Validation humaine",
+            "Historique & résultats"
+        ]
+    )
+
+    st.divider()
+    st.caption("Prototype pédagogique")
+    st.caption("Les décisions critiques restent supervisées par un humain.")
+
+
+# EN-TETE
+st.markdown("""
+<div class="hero">
+    <h1>LogiMind</h1>
+    <p>Fiabiliser les données pour anticiper les risques de livraison.</p>
+    <p>Qualité · Documentation · Linéage · Orchestration</p>
 </div>
-{% if r.status in ('Proposée','À réanalyser') %}<form class="side" method="post" action="{{url_for('decision',rid=r.id)}}">
- <input name="comment" placeholder="Commentaire (facultatif)">
- <button class="b-ok" name="d" value="accept">✓ Accepter</button>
- <button class="b-no" name="d" value="reject">✕ Rejeter</button>
- <button class="b-re" name="d" value="reanalyze">↻ Demander une réanalyse</button></form>{% else %}<div></div>{% endif %}</div>
-{% else %}<div class="empty">Rien à afficher ici. Toutes les recommandations ont été traitées 🎉</div>{% endfor %}""",
-              sc=sc, cnt=cnt, items=items, st=st)
-    return page("recs", body)
+""", unsafe_allow_html=True)
 
-@app.post("/decide/<int:rid>")
-def decision(rid):
-    agents.decide(DB, rid, request.form["d"], comment=request.form.get("comment", "").strip())
-    return redirect(request.referrer or url_for("recs"))
 
-@app.post("/run")
-def run(): agents.orchestrate(DB); return redirect(url_for("recs"))
+# PAGE 1 : VUE D'ENSEMBLE
+if page == "Vue d'ensemble":
+    st.subheader("Tableau de bord")
+    st.write(
+        "Identifiez les problèmes de données avant la préparation "
+        "des tournées de livraison."
+    )
 
-@app.post("/reset")
-def reset(): seed.build(); agents.orchestrate(DB); return redirect(url_for("recs"))
+    data = st.session_state.data
+    analysis = st.session_state.analysis
 
-@app.route("/quality")
-def quality():
-    sc = scores()
-    rows = q("SELECT table_name, count(*) n FROM recommendations WHERE type='quality' AND status IN ('Proposée','À réanalyser') GROUP BY table_name")
-    n = {r["table_name"]: r["n"] for r in rows}
-    body = tpl("""<h2>Qualité des données</h2><p class="sub">Part des lignes sans anomalie détectée. Le score remonte au fil des recommandations acceptées.</p>
-{% for t in tables %}{% set s=sc[t] %}<div class="score"><div><b>{{t}}</b><div style="color:var(--mut);font-size:12px">{{s.total}} lignes</div></div>
-<div class="track"><div class="fill" style="width:{{s.score}}%;background:{{'var(--ok)' if s.score>=90 else 'var(--mid)' if s.score>=75 else 'var(--hi)'}}"></div></div>
-<div><b style="font:700 22px Cambria,serif">{{s.score}}%</b><div style="color:var(--mut);font-size:12px">{{n.get(t,0)}} constat(s) ouvert(s)</div></div></div>{% endfor %}""",
-              sc=sc, n=n, tables=agents.TABLES)
-    return page("quality", body)
+    total_issues = (
+        0 if analysis is None else len(analysis["anomalies"])
+    )
 
-@app.route("/catalog")
-def catalog():
-    cols = []
-    con = agents.connect(DB)
-    cat = {(r["table_name"], r["column_name"]): r for r in agents.rows(con, "SELECT * FROM catalog")}
-    for t in agents.TABLES:
-        for c in con.execute(f"PRAGMA table_info({t})"):
-            cols.append((t, c["name"], c["type"], cat.get((t, c["name"]))))
-    con.close()
-    body = tpl("""<h2>Catalogue de données</h2><p class="sub">Métadonnées publiées après validation humaine.</p>
-<table><tr><th>Table</th><th>Colonne</th><th>Type</th><th>Description</th><th>Propriétaire</th><th>Sensibilité</th><th>Statut</th></tr>
-{% for t,c,ty,m in cols %}<tr><td>{{t}}</td><td><b>{{c}}</b></td><td>{{ty}}</td><td>{{m.description if m else '—'}}</td><td>{{m.owner if m else '—'}}</td><td>{{m.sensitivity if m else '—'}}</td>
-<td><span class="chip {{'g' if m else 'y'}}">{{'Validée' if m else 'Non documentée'}}</span></td></tr>{% endfor %}</table>""", cols=cols)
-    return page("catalog", body)
+    pending = 0
+    accepted = 0
+    rejected = 0
 
-@app.route("/lineage")
-def lineage():
-    edges = q("SELECT src,dst FROM lineage")
-    nodes = sorted({e["src"] for e in edges} | {e["dst"] for e in edges})
-    def lvl(n): return 0 if n.endswith((".csv", ".xlsx")) else 1 if n in agents.TABLES else 2 if n.startswith("v_") else 3
-    bad = {r["table_name"] for r in q("SELECT table_name FROM recommendations WHERE type='quality' AND severity='Haute' AND status IN ('Proposée','À réanalyser')")}
-    cols = [[n for n in nodes if lvl(n) == i] for i in range(4)]
-    W, H, GX, GY, TOP = 190, 38, 250, 62, 50
-    pos = {n: (20 + lvl(n) * GX, TOP + i * GY) for l in cols for i, n in enumerate(l)}
-    # propage la « contamination » vers l'aval
-    tainted = set(bad)
-    con2 = agents.connect(DB)
-    for b in bad: tainted |= set(agents.downstream(con2, b))
-    con2.close()
-    h = TOP + max(len(c) for c in cols) * GY
-    svg = [f'<svg width="{20+3*GX+W+20}" height="{h}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial">']
-    for i, t in enumerate(["Sources", "Tables", "Vues / KPI", "Rapports"]):
-        svg.append(f'<text x="{20+i*GX}" y="26" font-size="12" fill="#6B7690" font-weight="700" letter-spacing="1">{t.upper()}</text>')
-    for e in edges:
-        (x1, y1), (x2, y2) = pos[e["src"]], pos[e["dst"]]
-        x1 += W; y1 += H / 2; y2 += H / 2; m = (x1 + x2) / 2
-        hot = e["src"] in tainted and e["dst"] in tainted
-        svg.append(f'<path d="M{x1},{y1} C{m},{y1} {m},{y2} {x2},{y2}" fill="none" stroke="{"#F2A0A3" if hot else "#C8D2E6"}" stroke-width="2"/>')
-    for n, (x, y) in pos.items():
-        c = ("#FDECEC", "#E5484D") if n in bad else ("#FFF3DC", "#F5A524") if n in tainted else ("#EAF0FF", "#2F6BFF")
-        svg.append(f'<rect x="{x}" y="{y}" width="{W}" height="{H}" rx="9" fill="{c[0]}" stroke="{c[1]}" stroke-width="1.5"/>'
-                   f'<text x="{x+W/2}" y="{y+24}" font-size="13" text-anchor="middle" fill="#14213D" font-weight="600">{n}</text>')
-    svg.append("</svg>")
-    body = tpl("""<h2>Lineage des données</h2><p class="sub">D'où viennent les données et ce qu'elles alimentent.
-<span class="chip r">Anomalie grave</span> <span class="chip y">Impacté en aval</span> <span class="chip">Sain</span></p><div class="panel">{{svg|safe}}</div>""", svg="".join(svg))
-    return page("lineage", body)
+    if analysis is not None:
+        for i in range(total_issues):
+            decision = st.session_state.decisions.get(i)
+            if decision is None:
+                pending += 1
+            elif decision["decision"] == "Acceptée":
+                accepted += 1
+            else:
+                rejected += 1
 
-@app.route("/audit")
-def audit():
-    body = tpl("""<h2>Journal d'audit</h2><p class="sub">Chaque action d'un agent ou d'un humain est tracée.</p>
-<table><tr><th>Horodatage</th><th>Acteur</th><th>Action</th><th>Cible</th><th>Détails</th></tr>
-{% for r in rows %}<tr><td>{{r.ts}}</td><td><span class="chip {{'' if r.actor.startswith(('Agent','Orch')) else 'g'}}">{{r.actor}}</span></td><td>{{r.action}}</td><td>{{r.target}}</td><td>{{r.details}}</td></tr>{% endfor %}</table>""",
-              rows=q("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100"))
-    return page("audit", body)
+    a, b, c, d = st.columns(4)
+    a.metric("Commandes", len(data))
+    b.metric("Anomalies", total_issues)
+    c.metric("En attente", pending)
+    d.metric("Décisions acceptées", accepted)
 
-if __name__ == "__main__":
-    init()
-    print("→ Ouvrez http://127.0.0.1:5000")
-    app.run(debug=False, port=5000)
+    st.subheader("Parcours de gouvernance")
+
+    cols = st.columns(4)
+    steps = [
+        ("01", "Importer", "CSV de livraison"),
+        ("02", "Analyser", "Agents spécialisés"),
+        ("03", "Prioriser", "Orchestrateur"),
+        ("04", "Valider", "Responsable Data")
+    ]
+
+    for col, (num, title, description) in zip(cols, steps):
+        with col:
+            st.markdown(f"### {num}")
+            st.markdown(f"**{title}**")
+            st.caption(description)
+
+    st.info(
+        "LogiMind détecte les anomalies, propose des actions et conserve "
+        "les décisions humaines. Il ne corrige pas automatiquement "
+        "les données dans cette version."
+    )
+
+
+# PAGE 2 : DONNEES ET ANALYSE
+elif page == "Données & analyse":
+    st.subheader("Importer les données de livraison")
+
+    st.write(
+        "Utilisez le jeu de démonstration ou importez un fichier CSV. "
+        "Pour cette version, les colonnes attendues sont :"
+    )
+
+    st.code(
+        "commande_id, client_id, telephone, adresse, "
+        "date_livraison, statut, montant"
+    )
+
+    uploaded = st.file_uploader(
+        "Choisir un fichier CSV",
+        type=["csv"]
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button(
+            "Utiliser les données de démonstration",
+            use_container_width=True
+        ):
+            st.session_state.data = sample_data()
+            reset_analysis()
+            st.success("Données de démonstration chargées.")
+
+    with col2:
+        if st.button(
+            "Importer mon CSV",
+            use_container_width=True,
+            disabled=uploaded is None
+        ):
+            try:
+                st.session_state.data = pd.read_csv(uploaded)
+                reset_analysis()
+                st.success("Fichier CSV importé.")
+            except Exception as e:
+                st.error(f"Erreur de lecture du fichier : {e}")
+
+    st.subheader("Aperçu des données")
+    st.dataframe(
+        st.session_state.data,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if st.button(
+        "Lancer l'analyse des agents",
+        type="primary",
+        use_container_width=True
+    ):
+        try:
+            result = run_agents(st.session_state.data)
+
+            st.session_state.analysis = result
+            st.session_state.decisions = {}
+
+            record_history(
+                "Analyse lancée",
+                f"{len(result['anomalies'])} anomalie(s) détectée(s)"
+            )
+
+            st.success("Analyse terminée.")
+
+        except ValueError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Une erreur est survenue : {e}")
+
+    analysis = st.session_state.analysis
+
+    if analysis is not None:
+        st.divider()
+        st.subheader("Résultats de l'analyse")
+
+        anomalies = analysis["anomalies"]
+
+        if anomalies.empty:
+            st.success("Aucune anomalie détectée par les règles configurées.")
+        else:
+            st.dataframe(
+                anomalies[[
+                    "commande_id",
+                    "type",
+                    "agent",
+                    "priority",
+                    "detail",
+                    "recommendation"
+                ]],
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.caption(
+                "Priorité illustrative = gravité × impact. "
+                "Le score ne constitue pas une probabilité réelle "
+                "d'échec de livraison."
+            )
+
+        st.subheader("Documentation proposée")
+        st.dataframe(
+            analysis["documentation"],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Traçabilité des colonnes")
+        st.dataframe(
+            analysis["lineage"],
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+# PAGE 3 : AGENTS
+elif page == "Agents":
+    st.subheader("L'équipe LogiMind")
+    st.write(
+        "Quatre agents spécialisés collaborent pour fiabiliser "
+        "les données de livraison avant leur utilisation."
+    )
+
+    agent_info = [
+        (
+            "🧠 1. Orchestrateur",
+            "Coordonne le processus d'analyse, lance les contrôles "
+            "et rassemble les résultats pour préparer les priorités."
+        ),
+        (
+            "🛡️ 2. Agent Qualité",
+            "Détecte les valeurs manquantes, les doublons, "
+            "les téléphones suspects, les adresses incomplètes "
+            "et les dates invalides."
+        ),
+        (
+            "📚 3. Agent Documentation",
+            "Décrit les colonnes du fichier et aide à comprendre "
+            "les données analysées."
+        ),
+        (
+            "🔗 4. Agent Linéage",
+            "Trace la source du fichier et les étapes du traitement "
+            "pour faciliter la traçabilité."
+        )
+    ]
+
+    for name, description in agent_info:
+        with st.container(border=True):
+            st.markdown(f"### {name}")
+            st.write(description)
+
+    st.divider()
+    st.subheader("Cycle de collaboration")
+    
+    st.subheader("État des agents")
+
+    st.write(
+        "Suivez l'état de chaque agent pendant le traitement."
+    )
+
+    noms_agents = [
+        "Orchestrateur",
+        "Qualité",
+        "Documentation",
+        "Linéage"
+    ]
+
+    # États de démonstration : ils ne sont pas encore
+    # reliés à l'exécution réelle des agents.
+    etats = [
+        "Terminé",
+        "En cours",
+        "Bloqué",
+        "Terminé"
+    ]
+
+    valeurs = {
+        "Terminé": 0,
+        "En cours": 1,
+        "Bloqué": 2
+    }
+
+    couleurs = [
+        [0, 0, 0.49, "#2ca02c"],
+        [0.5, "#f39c12"],
+        [1, "#d62728"]
+    ]
+
+    matrice = [[valeurs[etat] for etat in etats]]
+
+    fig_heatmap = px.imshow(
+        matrice,
+        x=noms_agents,
+        y=["État"],
+        color_continuous_scale=[
+            [0, "#2ca02c"],
+            [0.499, "#2ca02c"],
+            [0.5, "#f39c12"],
+            [0.999, "#f39c12"],
+            [1, "#d62728"]
+        ],
+        zmin=0,
+        zmax=2,
+        aspect="auto"
+    )
+
+    fig_heatmap.update_traces(
+        text=[etats],
+        texttemplate="%{text}"
+    )
+
+    fig_heatmap.update_layout(
+        height=220,
+        coloraxis_showscale=False,
+        xaxis=dict(side="top"),
+        yaxis=dict(showticklabels=False)
+    )
+
+    st.plotly_chart(
+        fig_heatmap,
+        use_container_width=True
+    )
+
+    st.caption(
+        "Attention : les états affichés sont fictifs pour le moment. "
+        "La prochaine étape consistera à les relier à l'exécution réelle."
+    )
+
+    
+    
+
+
+    steps = [
+        ("1. Importation", "Le responsable importe un fichier CSV."),
+        ("2. Contrôle qualité", "L'agent Qualité recherche les anomalies."),
+        ("3. Documentation", "L'agent Documentation décrit les colonnes."),
+        ("4. Traçabilité", "L'agent Linéage conserve les informations de provenance."),
+        ("5. Synthèse", "L'Orchestrateur rassemble les résultats et les priorités."),
+        ("6. Validation humaine", "Le responsable accepte ou rejette les recommandations.")
+    ]
+
+    for title, description in steps:
+        with st.container(border=True):
+            st.markdown(f"**{title}**")
+            st.write(description)
+
+    analysis = st.session_state.analysis
+
+    if analysis is None:
+        st.info(
+            "Pour voir les résultats de la collaboration, "
+            "ouvrez «  Données & analyse» et lancez une analyse."
+        )
+    else:
+        anomalies = analysis["anomalies"]
+
+        st.success("Analyse disponible : les résultats sont prêts à être examinés.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Anomalies détectées", len(anomalies))
+        col2.metric(
+            "Agents concernés",
+            anomalies["agent"].nunique() if not anomalies.empty else 0
+        )
+        col3.metric(
+            "Commandes concernées",
+            anomalies["commande_id"].nunique() if not anomalies.empty else 0
+        )
+
+        st.write("**Résultats regroupés par agent**")
+
+        if not anomalies.empty:
+            st.dataframe(
+                anomalies.groupby("agent").size().reset_index(
+                    name="Nombre d'anomalies"
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Aucune anomalie n'a été détectée.")
+
+    st.warning(
+        "Limite du prototype : les agents utilisent actuellement "
+        "des règles Python. L'Orchestrateur rassemble les résultats, "
+        "mais les agents ne sont pas encore des agents autonomes basés "
+        "sur un modèle de langage (LLM). Le linéage reste simplifié."
+    )
+
+
+
+# PAGE 4 : VALIDATION HUMAINE
+elif page == "Validation humaine":
+    st.subheader("Centre de validation")
+
+    analysis = st.session_state.analysis
+
+    if analysis is None:
+        st.info("Lancez d'abord une analyse dans « Données & analyse ».")
+
+    elif analysis["anomalies"].empty:
+        st.success("Aucune recommandation à valider.")
+
+    else:
+        anomalies = analysis["anomalies"]
+
+        st.write(
+            "Examinez chaque recommandation. Accepter une recommandation "
+            "ne signifie pas que la donnée a été automatiquement corrigée."
+        )
+
+        for i, issue in anomalies.iterrows():
+            with st.container(border=True):
+                st.markdown(
+                    f"### {issue['commande_id']} — {issue['type']}"
+                )
+
+                st.write(f"**Agent :** {issue['agent']}")
+                st.write(f"**Priorité :** {issue['priority']} / 25")
+                st.write(f"**Constat :** {issue['detail']}")
+                st.write(
+                    f"**Recommandation :** {issue['recommendation']}"
+                )
+
+                current = st.session_state.decisions.get(i)
+
+                if current is not None:
+                    st.success(
+                        f"Décision : {current['decision']} — "
+                        f"{current['responsable']}"
+                    )
+                    if current["commentaire"]:
+                        st.caption(current["commentaire"])
+
+                else:
+                    with st.form(key=f"decision_form_{i}"):
+                        responsable = st.text_input(
+                            "Nom ou rôle du responsable",
+                            value="Responsable Data",
+                            key=f"responsable_{i}"
+                        )
+
+                        commentaire = st.text_input(
+                            "Commentaire (facultatif)",
+                            key=f"commentaire_{i}"
+                        )
+
+                        choix = st.radio(
+                            "Décision",
+                            ["Accepter", "Rejeter"],
+                            horizontal=True,
+                            key=f"choix_{i}"
+                        )
+
+                        submitted = st.form_submit_button(
+                            "Enregistrer la décision"
+                        )
+
+                    if submitted:
+                        decision = (
+                            "Acceptée"
+                            if choix == "Accepter"
+                            else "Rejetée"
+                        )
+
+                        record = {
+                            "decision": decision,
+                            "responsable": responsable.strip()
+                            or "Responsable Data",
+                            "commentaire": commentaire.strip(),
+                            "date": datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+                        }
+
+                        st.session_state.decisions[i] = record
+
+                        record_history(
+                            decision,
+                            f"{issue['commande_id']} — {issue['type']}",
+                            record["responsable"],
+                            record["commentaire"]
+                        )
+
+                        st.rerun()
+
+
+# PAGE 5 : HISTORIQUE ET RESULTATS
+elif page == "Historique & résultats":
+    st.subheader("Historique des actions")
+
+    if st.session_state.history:
+        st.dataframe(
+            pd.DataFrame(st.session_state.history),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info(
+            "L'historique apparaîtra après le lancement d'une analyse "
+            "ou l'enregistrement d'une décision."
+        )
+
+    st.divider()
+    st.subheader("Bilan de l'analyse")
+
+    analysis = st.session_state.analysis
+
+    if analysis is None:
+        st.info("Lancez d'abord une analyse.")
+
+    else:
+        anomalies = analysis["anomalies"]
+        total = len(anomalies)
+
+        accepted = sum(
+            decision["decision"] == "Acceptée"
+            for decision in st.session_state.decisions.values()
+        )
+
+        rejected = sum(
+            decision["decision"] == "Rejetée"
+            for decision in st.session_state.decisions.values()
+        )
+
+        pending = total - accepted - rejected
+
+        metrics = pd.DataFrame({
+            "Indicateur": [
+                "Anomalies détectées",
+                "Recommandations acceptées",
+                "Recommandations rejetées",
+                "Décisions en attente"
+            ],
+            "Nombre": [total, accepted, rejected, pending]
+        })
+
+        st.dataframe(
+            metrics,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        fig = px.bar(
+            metrics,
+            x="Indicateur",
+            y="Nombre",
+            title="Bilan des recommandations"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption(
+            "Les décisions et l'historique sont conservés en mémoire "
+            "pendant la session. Cette version ne modifie pas les données "
+            "et ne sauvegarde pas encore les décisions dans PostgreSQL."
+        )
+
+
+# PIED DE PAGE
+st.divider()
+st.caption(
+    "LogiMind — Prototype pédagogique | "
+    "Analyse des données de livraison | Validation humaine requise"
+)
