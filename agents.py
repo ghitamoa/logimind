@@ -188,8 +188,17 @@ def agent_documentation(df):
     # Récupération sécurisée de la clé API
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
-    except Exception:
-        api_key = None
+    
+        except Exception as e:
+            print(
+                f"Erreur Gemini : {type(e).__name__}: "
+                f"{str(e)[:500]}"
+            )
+            st.warning(
+                "Gemini est momentanément indisponible. "
+                "Consultez les logs de Streamlit Cloud."
+            )
+
 
     if not api_key:
         api_key = os.getenv("GEMINI_API_KEY")
