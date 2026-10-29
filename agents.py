@@ -1,6 +1,13 @@
 
 import pandas as pd
 
+import json
+import os
+import re
+import streamlit as st
+from google import genai
+
+
 
 # COLONNES ATTENDUES PAR LOGIMIND
 REQUIRED_COLUMNS = [
@@ -164,30 +171,97 @@ def agent_qualite(df):
 
 
 # AGENT 2 : DOCUMENTATION
+
 def agent_documentation(df):
     descriptions = {
         "commande_id": "Identifiant unique de la commande.",
         "client_id": "Identifiant du client.",
-        "telephone": "Numero de contact du destinataire.",
+        "telephone": "Numéro de contact du destinataire.",
         "adresse": "Adresse de livraison du colis.",
-        "date_livraison": "Date prevue pour la livraison.",
-        "statut": "Etat actuel de la commande.",
-        "montant": "Montant associe a la commande."
+        "date_livraison": "Date prévue pour la livraison.",
+        "statut": "État actuel de la commande.",
+        "montant": "Montant associé à la commande."
     }
 
+    descriptions_gemini = {}
+
+    # Récupération sécurisée de la clé API
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY")
+    except Exception:
+        api_key = None
+
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY")
+
+    # Demande de descriptions à Gemini
+    if api_key:
+        try:
+            client = genai.Client(api_key=api_key)
+
+            colonnes = [str(col) for col in df.columns]
+
+            prompt = f"""
+Tu es un assistant spécialisé en gouvernance des données.
+
+Pour chaque colonne de cette liste :
+{json.dumps(colonnes, ensure_ascii=False)}
+
+Propose une description courte, claire et professionnelle
+en français, adaptée à un fichier de commandes de livraison.
+
+Retourne uniquement un objet JSON valide.
+Chaque clé doit être le nom exact d'une colonne et chaque
+valeur doit être sa description.
+N'invente pas d'informations qui ne sont pas connues.
+"""
+
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt
+            )
+
+            texte = response.text or ""
+
+            # Extraction du JSON produit par le modèle
+            correspondance = re.search(
+                r"\{.*\}",
+                texte,
+                re.DOTALL
+            )
+
+            if correspondance:
+                resultat = json.loads(correspondance.group(0))
+
+                if isinstance(resultat, dict):
+                    descriptions_gemini = resultat
+
+        except Exception:
+            st.warning(
+                "Gemini est momentanément indisponible. "
+                "Les descriptions de référence seront utilisées."
+            )
+
+    # Constitution du tableau de documentation
     documentation = []
 
     for colonne in df.columns:
+        description = descriptions_gemini.get(colonne)
+
+        if not isinstance(description, str) or not description.strip():
+            description = descriptions.get(
+                colonne,
+                "Description à définir avec le responsable métier."
+            )
+
         documentation.append({
             "Colonne": colonne,
-            "Description proposee": descriptions.get(
-                colonne,
-                "Description a definir avec le responsable metier."
-            ),
-            "Validation": "A valider par le responsable metier"
+            "Description proposée": description.strip(),
+            "Validation": "À valider par le responsable métier"
         })
 
     return pd.DataFrame(documentation)
+
 
 
 # AGENT 3 : LINEAGE
@@ -248,4 +322,4 @@ def run_agents(df, source="Fichier importe"):
     resultat = agent_orchestrateur(df, source)
 
     return resultat
-
+p
